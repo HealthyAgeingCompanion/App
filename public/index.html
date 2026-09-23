@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=3.0" />
-<title>Healthy Ageing AI — a plan for the years ahead</title>
+<title>The Healthy Ageing Companion</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.5/purify.min.js"></script>
 <style>
@@ -152,13 +152,31 @@
     color: var(--accent);
     border: 1px solid var(--accent);
   }
-  .start-screen {
+  button.choice {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: white;
+    color: var(--ink);
+    border: 1px solid var(--border);
+    margin-bottom: 10px;
+    font-size: 16px;
+    padding: 14px 16px;
+  }
+  button.choice:hover { border-color: var(--accent); }
+  .start-screen, .step-panel {
     padding: 24px 20px;
   }
-  .start-screen h2 {
-    margin: 0 0 16px;
+  .start-screen h2, .step-panel h2 {
+    margin: 0 0 8px;
     font-size: 19px;
     color: var(--accent);
+    text-align: center;
+  }
+  .step-panel p.step-sub {
+    margin: 0 0 16px;
+    font-size: 15px;
+    color: var(--muted);
     text-align: center;
   }
   .field {
@@ -169,6 +187,11 @@
     font-size: 15px;
     color: var(--muted);
     margin-bottom: 6px;
+  }
+  .field .optional-tag {
+    font-size: 13px;
+    color: var(--muted);
+    font-weight: normal;
   }
   .field input, .field select {
     width: 100%;
@@ -181,13 +204,35 @@
     color: var(--ink);
   }
   .field input:focus, .field select:focus { outline: 2px solid var(--accent); }
-  .start-screen-actions { text-align: center; margin-top: 18px; }
-  .start-screen button { font-size: 19px; padding: 16px 32px; }
+  .field-row {
+    display: flex;
+    gap: 12px;
+  }
+  .field-row .field { flex: 1; }
+  .optional-divider {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 18px 0 16px;
+  }
+  .optional-label {
+    font-size: 14px;
+    color: var(--muted);
+    text-align: center;
+    margin: 0 0 14px;
+  }
+  .start-screen-actions, .step-panel-actions { text-align: center; margin-top: 18px; }
+  .start-screen button, .step-panel-actions > button { font-size: 19px; padding: 16px 32px; }
   .field-error {
     color: var(--danger);
     font-size: 14px;
     margin-top: 4px;
     display: none;
+  }
+  .followup-confirm {
+    text-align: center;
+    color: var(--accent);
+    font-size: 16px;
+    padding: 10px 20px 4px;
   }
   .plan-actions {
     display: flex;
@@ -199,22 +244,25 @@
   @media (max-width: 480px) {
     body { font-size: 17px; }
     header h1 { font-size: 22px; }
+    .field-row { flex-direction: column; gap: 0; }
   }
 </style>
 </head>
 <body>
 <div class="wrap">
   <header>
-    <h1>Healthy Ageing AI</h1>
+    <h1>The Healthy Ageing Companion</h1>
     <p>An early proof of concept from the Oxford Longevity Project</p>
   </header>
 
   <div class="notice">
     <b>Before you start:</b> this gives general guidance drawn from Sir Muir Gray's healthy
-    ageing work, not medical advice, and it's not a substitute for seeing your GP. Your name
-    and general location are used only to personalise this conversation and to look up local
-    activities near you. Nothing you type is stored on a server — it stays in this browser
-    tab and disappears when you close it, unless you choose to download your plan at the end.
+    ageing work, not medical advice, and it's not a substitute for seeing your GP. Your name,
+    age band and location personalise this conversation and help find local activities near
+    you. Gender, height and weight are optional and only help tailor suggestions. Nothing you
+    type here is stored on our servers, unless you choose a two-week check-in at the end, in
+    which case we keep only your email address and a short summary of today's plan, purely to
+    send that one follow-up.
   </div>
 
   <main id="chat"></main>
@@ -242,9 +290,54 @@
       <label for="locationInput">Town or area (used to find local activities near you)</label>
       <input id="locationInput" type="text" autocomplete="address-level2" placeholder="e.g. Oxford" />
     </div>
-    <div class="field-error" id="formError">Please fill in all three fields to continue.</div>
+
+    <hr class="optional-divider" />
+    <p class="optional-label">Everything below is optional — skip anything you'd rather not say.</p>
+
+    <div class="field">
+      <label for="genderInput">Gender <span class="optional-tag">(optional)</span></label>
+      <select id="genderInput">
+        <option value="">Prefer not to say</option>
+        <option value="Female">Female</option>
+        <option value="Male">Male</option>
+        <option value="Non-binary">Non-binary</option>
+      </select>
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <label for="heightInput">Height <span class="optional-tag">(optional)</span></label>
+        <input id="heightInput" type="text" placeholder="e.g. 5'5&quot; or 165cm" />
+      </div>
+      <div class="field">
+        <label for="weightInput">Weight <span class="optional-tag">(optional)</span></label>
+        <input id="weightInput" type="text" placeholder="e.g. 11 stone or 70kg" />
+      </div>
+    </div>
+
+    <div class="field-error" id="formError">Please fill in your name, age band and location to continue.</div>
     <div class="start-screen-actions">
       <button id="startBtn">Start my conversation</button>
+    </div>
+  </div>
+
+  <div id="commitStep" class="step-panel" style="display:none;">
+    <h2>Which one are you actually going to try?</h2>
+    <p class="step-sub">Pick the one you're most likely to stick with this week — the rest will still be in your plan.</p>
+    <div id="commitChoices"></div>
+  </div>
+
+  <div id="followupStep" class="step-panel" style="display:none;">
+    <h2>Want a check-in in two weeks?</h2>
+    <p class="step-sub">We'll email you a link back to a short follow-up conversation. No account, no password.</p>
+    <div class="field">
+      <label for="followupEmailInput">Your email address</label>
+      <input id="followupEmailInput" type="email" autocomplete="email" placeholder="you@example.com" />
+    </div>
+    <div class="field-error" id="followupError">Please enter a valid email address.</div>
+    <div class="followup-confirm" id="followupConfirm" style="display:none;"></div>
+    <div class="step-panel-actions">
+      <button id="followupYesBtn">Yes, email me in two weeks</button>
+      <button id="followupNoBtn" class="secondary" style="margin-top:10px;">No thanks</button>
     </div>
   </div>
 
@@ -263,6 +356,14 @@
 (function () {
   const chatEl = document.getElementById("chat");
   const startScreen = document.getElementById("startScreen");
+  const commitStep = document.getElementById("commitStep");
+  const commitChoices = document.getElementById("commitChoices");
+  const followupStep = document.getElementById("followupStep");
+  const followupEmailInput = document.getElementById("followupEmailInput");
+  const followupError = document.getElementById("followupError");
+  const followupConfirm = document.getElementById("followupConfirm");
+  const followupYesBtn = document.getElementById("followupYesBtn");
+  const followupNoBtn = document.getElementById("followupNoBtn");
   const inputBar = document.getElementById("inputBar");
   const planActions = document.getElementById("planActions");
   const userInput = document.getElementById("userInput");
@@ -273,11 +374,18 @@
   const nameInput = document.getElementById("nameInput");
   const ageBandInput = document.getElementById("ageBandInput");
   const locationInput = document.getElementById("locationInput");
+  const genderInput = document.getElementById("genderInput");
+  const heightInput = document.getElementById("heightInput");
+  const weightInput = document.getElementById("weightInput");
   const formError = document.getElementById("formError");
 
   let messages = [];
   let lastPlanMarkdown = "";
   let testerName = "";
+  let testerAgeBand = "";
+  let testerLocation = "";
+  let committedActionText = "";
+  let currentMode = "first"; // "first" or "followup"
   let sending = false;
 
   function escapeHtml(text) {
@@ -328,6 +436,25 @@
     return idx >= 0 ? text.slice(idx) : "";
   }
 
+  // Pulls out the numbered list of changes at the top of the plan (before
+  // the first "### " subheading), so the person can pick the one they're
+  // actually going to commit to. Returns [] if the shape isn't there, in
+  // which case the commit step is skipped gracefully.
+  function extractChanges(planMarkdown) {
+    try {
+      const afterHeading = planMarkdown.replace(/^##\s*Your plan\s*/i, "");
+      const cutIdx = afterHeading.indexOf("### ");
+      const section = cutIdx >= 0 ? afterHeading.slice(0, cutIdx) : afterHeading;
+      if (typeof marked === "undefined") return [];
+      const tokens = marked.lexer(section);
+      const listToken = tokens.find((t) => t.type === "list");
+      if (!listToken || !listToken.items) return [];
+      return listToken.items.map((item) => (item.text || "").trim()).filter(Boolean);
+    } catch (err) {
+      return [];
+    }
+  }
+
   async function sendToServer() {
     sending = true;
     sendBtn.disabled = true;
@@ -336,7 +463,7 @@
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ messages }),
+        body: JSON.stringify({ messages, mode: currentMode === "followup" ? "followup" : "first" }),
       });
       const data = await res.json();
       typingEl.remove();
@@ -359,11 +486,13 @@
       addBubble("assistant", data.reply);
       messages.push({ role: "assistant", content: data.reply });
 
-      const plan = extractPlan(data.reply);
-      if (plan) {
-        lastPlanMarkdown = plan;
-        inputBar.style.display = "none";
-        planActions.style.display = "flex";
+      if (currentMode === "first") {
+        const plan = extractPlan(data.reply);
+        if (plan) {
+          lastPlanMarkdown = plan;
+          inputBar.style.display = "none";
+          showCommitOrFollowup();
+        }
       }
     } catch (err) {
       typingEl.remove();
@@ -371,6 +500,28 @@
     }
     sending = false;
     sendBtn.disabled = false;
+  }
+
+  function showCommitOrFollowup() {
+    const changes = extractChanges(lastPlanMarkdown);
+    if (changes.length > 0) {
+      commitChoices.innerHTML = "";
+      changes.forEach((changeText) => {
+        const btn = document.createElement("button");
+        btn.className = "choice";
+        btn.textContent = changeText.length > 140 ? changeText.slice(0, 140) + "…" : changeText;
+        btn.addEventListener("click", () => {
+          committedActionText = changeText;
+          commitStep.style.display = "none";
+          followupStep.style.display = "block";
+        });
+        commitChoices.appendChild(btn);
+      });
+      commitStep.style.display = "block";
+    } else {
+      committedActionText = "";
+      followupStep.style.display = "block";
+    }
   }
 
   function autoGrow() {
@@ -397,6 +548,20 @@
 
   sendBtn.addEventListener("click", handleSend);
 
+  function buildOpeningMessage(name, ageBand, location, gender, height, weight) {
+    const optionalParts = [];
+    if (gender) optionalParts.push("gender: " + gender);
+    if (height) optionalParts.push("height: " + height);
+    if (weight) optionalParts.push("weight: " + weight);
+    const optionalClause = optionalParts.length ? " " + optionalParts.join(", ") + "." : "";
+    return (
+      "I'm " + name + ", age band " + ageBand + ", based near " + location + "." +
+      optionalClause +
+      " I'm ready to start. Please introduce yourself briefly, greet me by name, and ask " +
+      "your first question."
+    );
+  }
+
   startBtn.addEventListener("click", () => {
     const name = nameInput.value.trim();
     const ageBand = ageBandInput.value;
@@ -408,19 +573,78 @@
     }
     formError.style.display = "none";
     testerName = name;
+    testerAgeBand = ageBand;
+    testerLocation = location;
+    currentMode = "first";
 
     startScreen.style.display = "none";
     inputBar.style.display = "flex";
     messages = [
       {
         role: "user",
-        content:
-          "I'm " + name + ", age band " + ageBand + ", based near " + location + ". " +
-          "I'm ready to start. Please introduce yourself briefly, greet me by name, and ask " +
-          "your first question.",
+        content: buildOpeningMessage(
+          name, ageBand, location,
+          genderInput.value, heightInput.value.trim(), weightInput.value.trim()
+        ),
       },
     ];
     sendToServer();
+  });
+
+  // ---- Commit-to-one-change step is wired above via showCommitOrFollowup ----
+
+  // ---- Follow-up opt-in ----
+  followupNoBtn.addEventListener("click", () => {
+    followupStep.style.display = "none";
+    planActions.style.display = "flex";
+  });
+
+  followupYesBtn.addEventListener("click", async () => {
+    const email = followupEmailInput.value.trim();
+    const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+    if (!emailOk) {
+      followupError.style.display = "block";
+      return;
+    }
+    followupError.style.display = "none";
+    followupYesBtn.disabled = true;
+
+    try {
+      const res = await fetch("/api/followup", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          name: testerName,
+          email,
+          ageBand: testerAgeBand,
+          location: testerLocation,
+          committedAction: committedActionText,
+          planText: lastPlanMarkdown,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        followupError.textContent = data.error || "Couldn't save that just now. Please try again.";
+        followupError.style.display = "block";
+        followupYesBtn.disabled = false;
+        return;
+      }
+      const sendDate = new Date(data.sendDate).toLocaleDateString("en-GB", {
+        day: "numeric", month: "long",
+      });
+      followupConfirm.textContent = "Thank you — we'll email you on " + sendDate + ".";
+      followupConfirm.style.display = "block";
+      followupYesBtn.style.display = "none";
+      followupNoBtn.style.display = "none";
+      setTimeout(() => {
+        followupStep.style.display = "none";
+        planActions.style.display = "flex";
+      }, 1800);
+    } catch (err) {
+      followupError.textContent = "Couldn't reach the server. Please try again.";
+      followupError.style.display = "block";
+      followupYesBtn.disabled = false;
+    }
   });
 
   // Builds a standalone, styled HTML document for the downloadable report,
@@ -459,10 +683,11 @@
       "@media print{body{background:white;}.panel{border:none;}}" +
       "</style></head><body>" +
       "<div class=\"wrap\">" +
-      "<header><h1>Healthy Ageing AI</h1>" +
+      "<header><h1>The Healthy Ageing Companion</h1>" +
       "<p>An early proof of concept from the Oxford Longevity Project · " + today + "</p></header>" +
       "<div class=\"panel\">" + bodyHtml + "</div>" +
-      "<footer>General guidance only, not medical advice. Not a substitute for seeing your GP.</footer>" +
+      "<footer>General guidance only, not medical advice. Not a substitute for seeing your GP. " +
+      "Worth sharing this with someone who'll ask how you're getting on.</footer>" +
       "</div></body></html>"
     );
   }
@@ -483,18 +708,99 @@
     URL.revokeObjectURL(url);
   });
 
-  restartBtn.addEventListener("click", () => {
+  function resetToStart() {
     messages = [];
     lastPlanMarkdown = "";
     testerName = "";
+    testerAgeBand = "";
+    testerLocation = "";
+    committedActionText = "";
+    currentMode = "first";
     chatEl.innerHTML = "";
     planActions.style.display = "none";
+    commitStep.style.display = "none";
+    followupStep.style.display = "none";
+    followupConfirm.style.display = "none";
+    followupYesBtn.style.display = "inline-block";
+    followupNoBtn.style.display = "inline-block";
+    followupYesBtn.disabled = false;
+    followupEmailInput.value = "";
+    followupError.style.display = "none";
     nameInput.value = "";
     ageBandInput.value = "";
     locationInput.value = "";
+    genderInput.value = "";
+    heightInput.value = "";
+    weightInput.value = "";
     formError.style.display = "none";
     startScreen.style.display = "block";
-  });
+    // Drop the ?resume=... param so "start again" doesn't re-trigger it.
+    if (window.history && window.history.replaceState) {
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }
+
+  restartBtn.addEventListener("click", resetToStart);
+
+  // ---- Two-week resume flow: ?resume=<token> in the URL ----
+  function tryResumeFromLink() {
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get("resume");
+    if (!token) return;
+
+    startScreen.style.display = "none";
+    const loadingEl = addBubble("system-note", "Finding your previous conversation…");
+
+    fetch("/api/followup/" + encodeURIComponent(token))
+      .then((res) => res.json().then((data) => ({ ok: res.ok, data })))
+      .then(({ ok, data }) => {
+        loadingEl.remove();
+        if (!ok) {
+          addBubble(
+            "system-note",
+            "We couldn't find that check-in link — it may have expired or already been used. " +
+              "You can start a fresh conversation below instead."
+          );
+          startScreen.style.display = "block";
+          return;
+        }
+        currentMode = "followup";
+        testerName = data.name || "";
+        testerAgeBand = data.ageBand || "";
+        testerLocation = data.location || "";
+        committedActionText = data.committedAction || "";
+
+        const summary = data.planText
+          ? "Here is a summary of what I was given then:\n\n" + data.planText + "\n\n"
+          : "";
+        const committedClause = committedActionText
+          ? "I committed to trying: \"" + committedActionText + "\". "
+          : "";
+
+        inputBar.style.display = "flex";
+        messages = [
+          {
+            role: "user",
+            content:
+              "I'm " + testerName + ", picking up our two-week check-in. Last time, based near " +
+              testerLocation + " (age band " + testerAgeBand + "). " + committedClause + summary +
+              "Please start the check-in now, greet me by name, and ask how that specific thing went.",
+          },
+        ];
+        sendToServer();
+      })
+      .catch(() => {
+        loadingEl.remove();
+        addBubble(
+          "system-note",
+          "Couldn't reach the server to find your previous conversation. You can start a fresh " +
+            "conversation below instead."
+        );
+        startScreen.style.display = "block";
+      });
+  }
+
+  tryResumeFromLink();
 })();
 </script>
 </body>
