@@ -221,7 +221,17 @@ GUARDRAILS — NEVER BREAK THESE
 // Both prompts below take the knowledge-base text as a parameter now,
 // instead of a fixed constant baked in at startup, since that text comes
 // fresh from the real library on every request (see getLibraryContext above).
-function buildSystemPrompt(knowledgeBaseText) {
+//
+// forceWrapUp: the "12-15 exchanges" guidance below is only ever a
+// suggestion the model can wander past — a tester who gives rich, detailed
+// answers naturally invites more follow-up questions, and nothing was
+// stopping the conversation running well beyond that if it did. Once the
+// caller decides enough turns have passed (see FORCE_PLAN_AT_MESSAGE_COUNT),
+// this appends a hard instruction to stop asking and write the plan now,
+// which is what actually guarantees every conversation reaches an ending —
+// and the download button and follow-up offer, which only appear once the
+// front end sees "## Your plan" in a reply.
+function buildSystemPrompt(knowledgeBaseText, forceWrapUp) {
   return `
 You are the assistant behind ${APP_NAME}, a proof-of-concept built for the Oxford
 Longevity Project (the "Ageing Well" work with Sir Muir Gray). You are talking with a
@@ -297,6 +307,15 @@ containing, in this order:
 Keep the whole plan readable in three or four minutes. Plain language, short sentences, no
 jargon, no lecturing.
 
+${forceWrapUp ? `
+STOP HERE AND WRITE THE PLAN NOW
+The conversation has already run long enough. Whatever you feel you could still ask, do not
+ask another question this turn. Use everything the person has told you so far, however
+complete or incomplete it feels, and write the full "## Your plan" section right now,
+following the structure above. If a topic never came up, just work with what you do have
+rather than stopping to ask for it.
+` : ""}
+
 ${GUARDRAILS}
 
 KNOWLEDGE BASE
@@ -351,6 +370,17 @@ ${knowledgeBaseText}
 // per-conversation search cost bounded.
 const WEB_SEARCH_UNLOCK_AT_MESSAGE_COUNT = 16;
 const MAX_SEARCHES_PER_REQUEST = 4;
+
+// Hard ceiling on the intake conversation. The system prompt already asks
+// for "roughly 12-15 exchanges", but that's only ever a suggestion — a
+// tester who gives long, detailed answers can end up in a much longer
+// back-and-forth than intended, with no plan, no download button and no
+// follow-up offer ever appearing, because none of those show up until the
+// model actually writes "## Your plan". Counting both sides of the
+// conversation (including the opening message), 15 exchanges is roughly 30
+// messages, so this gives a bit of headroom beyond the target before
+// forcing a stop, rather than cutting off right at it.
+const FORCE_PLAN_AT_MESSAGE_COUNT = 34;
 
 // Extremely blunt server-side safety net. This is a backstop, not the whole
 // guardrail — the system prompt above carries the real instruction. If any
@@ -499,6 +529,8 @@ app.post("/api/chat", async (req, res) => {
     // see getLibraryContext above).
     const knowledgeBaseText = await getLibraryContext(String(lastUserMessage?.content || ""));
 
+    const forceWrapUp = !isFollowup && messages.length >= FORCE_PLAN_AT_MESSAGE_COUNT;
+
     const requestBody = {
       model: MODEL,
       // Was 1536. The real library gives the model far more specific detail
@@ -510,7 +542,9 @@ app.post("/api/chat", async (req, res) => {
       // stalling and needing an "ok" nudge to carry on instead of finishing
       // the plan in one go.
       max_tokens: 4096,
-      system: isFollowup ? buildFollowupSystemPrompt(knowledgeBaseText) : buildSystemPrompt(knowledgeBaseText),
+      system: isFollowup
+        ? buildFollowupSystemPrompt(knowledgeBaseText)
+        : buildSystemPrompt(knowledgeBaseText, forceWrapUp),
       messages: messages.map((m) => ({ role: m.role, content: m.content })),
     };
 
