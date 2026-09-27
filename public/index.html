@@ -379,6 +379,16 @@
   const weightInput = document.getElementById("weightInput");
   const formError = document.getElementById("formError");
 
+  // Optimistic default so a slow or failed /api/health check never blocks
+  // anything — worst case, someone sees the follow-up step and gets the
+  // plain-English error from the server if it's genuinely not set up yet.
+  // Corrected to the real value below as soon as the check comes back.
+  let followupsEnabled = true;
+  fetch("/api/health")
+    .then((res) => res.json())
+    .then((data) => { followupsEnabled = Boolean(data.followupsEnabled); })
+    .catch(() => {});
+
   let messages = [];
   let lastPlanMarkdown = "";
   let testerName = "";
@@ -515,6 +525,22 @@
     sendBtn.disabled = false;
   }
 
+  // Shows the "want a check-in in two weeks?" step only when that feature is
+  // actually configured on this deployment (checked once at page load, see
+  // followupsEnabled below). Otherwise it's skipped entirely and the person
+  // goes straight to their download/restart options — asking for an email
+  // address for a feature that's guaranteed to fail on submission, then
+  // stranding the person there with no obvious way forward, is worse than
+  // not asking at all.
+  function showFollowupOrFinish() {
+    if (followupsEnabled) {
+      followupStep.style.display = "block";
+    } else {
+      planActions.style.display = "flex";
+    }
+    scrollToBottom();
+  }
+
   function showCommitOrFollowup() {
     const changes = extractChanges(lastPlanMarkdown);
     if (changes.length > 0) {
@@ -526,15 +552,14 @@
         btn.addEventListener("click", () => {
           committedActionText = changeText;
           commitStep.style.display = "none";
-          followupStep.style.display = "block";
-          scrollToBottom();
+          showFollowupOrFinish();
         });
         commitChoices.appendChild(btn);
       });
       commitStep.style.display = "block";
     } else {
       committedActionText = "";
-      followupStep.style.display = "block";
+      showFollowupOrFinish();
     }
     scrollToBottom();
   }
