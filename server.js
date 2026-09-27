@@ -69,16 +69,22 @@ async function ensureFollowupsTable() {
 }
 
 // ---------------------------------------------------------------------------
-// STARTER KNOWLEDGE BASE (placeholder)
+// REAL LIBRARY LOOKUP (Pinecone Assistant)
 //
-// This is a small, hand-picked set of publicly available material from
-// Sir Muir Gray's "Live Longer Better" work, standing in for the real
-// document library. Before this goes past the trial, swap this block for
-// content pulled from his actual documents (see the brainstorm doc, section
-// "Knowledge base").
+// Sir Muir Gray's actual document library (1,600+ files) now lives in a
+// Pinecone Assistant. Instead of baking a small hand-picked sample into this
+// file, every turn asks that assistant for the passages most relevant to
+// what the tester just said, and those passages become the knowledge base
+// for that one reply. If Pinecone can't be reached for any reason, we fall
+// back to the old small sample below rather than letting the request fail —
+// a degraded reply is better than no reply.
 // ---------------------------------------------------------------------------
-const KNOWLEDGE_BASE = `
-SIR MUIR GRAY'S FRAMEWORK (starter set — replace with his full document library before wider rollout)
+const PINECONE_API_KEY = process.env.PINECONE_API_KEY;
+const PINECONE_ASSISTANT_NAME = process.env.PINECONE_ASSISTANT_NAME || "healthy-ageing-companion";
+const PINECONE_CONTEXT_URL = `https://prod-1-data.ke.pinecone.io/assistant/chat/${PINECONE_ASSISTANT_NAME}/context`;
+
+const FALLBACK_KNOWLEDGE_BASE = `
+SIR MUIR GRAY'S FRAMEWORK (fallback sample — only used if the real library lookup fails)
 
 The 4 S's of fitness:
 - Strength: muscle power, needed for stairs, getting up from a chair, carrying shopping.
@@ -107,6 +113,87 @@ Practical, low-barrier advice (Gray's own tone: no gym, no problem; start where 
 Tone: encouraging, plain-spoken, never intimidating. Meet people exactly where they are.
 `.trim();
 
+// Asks the real library for the passages most relevant to `query` (typically
+// the tester's latest message). Returns a plain-text block ready to drop
+// into the system prompt, each excerpt labelled with its source document so
+// the model can name it. Never throws — on any failure it logs the problem
+// and returns the fallback sample instead, so a Pinecone hiccup degrades the
+// reply rather than breaking the conversation.
+async function getLibraryContext(query) {
+  if (!PINECONE_API_KEY || !query || !String(query).trim()) {
+    console.log("[library] no API key or empty query — using FALLBACK sample, not the real library");
+    return FALLBACK_KNOWLEDGE_BASE;
+  }
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+    const pcRes = await fetch(PINECONE_CONTEXT_URL, {
+      method: "POST",
+      headers: {
+        "Api-Key": PINECONE_API_KEY,
+        accept: "application/json",
+        "content-type": "application/json",
+        "X-Pinecone-Api-Version": "2026-07",
+      },
+      body: JSON.stringify({ query: String(query).slice(0, 4000), top_k: 8, snippet_size: 1200 }),
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+
+    if (!pcRes.ok) {
+      console.error(
+        "[library] Pinecone lookup failed, falling back to sample:",
+        pcRes.status,
+        await pcRes.text()
+      );
+      return FALLBACK_KNOWLEDGE_BASE;
+    }
+
+    const data = await pcRes.json();
+    const snippets = Array.isArray(data.snippets) ? data.snippets : [];
+    if (snippets.length === 0) {
+      console.log("[library] Pinecone returned zero snippets for this query — using FALLBACK sample");
+      return FALLBACK_KNOWLEDGE_BASE;
+    }
+
+    const names = snippets.map((s) => s.reference?.file?.name || "an unnamed source");
+    console.log(`[library] REAL LIBRARY used — ${snippets.length} snippet(s) from: ${names.join(" | ")}`);
+
+    const formatted = snippets
+      .map((s, i) => {
+        const name = s.reference?.file?.name || "an unnamed source";
+        return `[Source ${i + 1}: ${name}]\n${s.content}`;
+      })
+      .join("\n\n");
+
+    return `SIR MUIR GRAY'S LIBRARY — passages retrieved for this reply\n\n${formatted}`;
+  } catch (err) {
+    console.error("[library] Pinecone lookup threw an error, falling back to sample:", err);
+    return FALLBACK_KNOWLEDGE_BASE;
+  }
+}
+
+// Debug endpoint: runs the exact same library lookup the chat uses, for one
+// query typed straight into a URL, and reports back whether the answer came
+// from the real Pinecone library or the small fallback sample — plus, when
+// it's the real library, the actual source filenames that were retrieved.
+// This is the fastest way to check the real library is wired up: visit
+//   /api/debug/library?q=balance exercises for someone in their 70s
+// "usedRealLibrary": true with a list of real filenames in "sources" is
+// proof positive — the hardcoded fallback sample has no files to name.
+app.get("/api/debug/library", async (req, res) => {
+  const q = String(req.query.q || "").trim();
+  if (!q) {
+    return res
+      .status(400)
+      .json({ error: "Add a query, e.g. /api/debug/library?q=balance exercises for someone in their 70s" });
+  }
+  const text = await getLibraryContext(q);
+  const usedRealLibrary = text.startsWith("SIR MUIR GRAY'S LIBRARY");
+  const sources = usedRealLibrary ? [...text.matchAll(/\[Source \d+: (.+?)\]/g)].map((m) => m[1]) : [];
+  res.json({ query: q, usedRealLibrary, sources, text });
+});
+
 const GUARDRAILS = `
 GUARDRAILS — NEVER BREAK THESE
 - You do not diagnose. Describe patterns in plain language, never name a medical
@@ -123,9 +210,19 @@ GUARDRAILS — NEVER BREAK THESE
   advice, and are not a substitute for seeing a doctor.
 - web_search is for finding real local activity venues only, used once you've reached that
   stage of the conversation, never earlier and never for anything medical.
+- If someone mentions a self-devised remedy or workaround they already rely on (mouth
+  taping for sleep, a home remedy, long-term reliance on an over-the-counter aid, and
+  similar), don't endorse it or treat it as settled. Note once, plainly, that it's worth
+  checking with a GP that it isn't masking something else (mouth taping specifically can
+  make undiagnosed sleep apnea worse, since it can stop someone breathing through the
+  mouth if the nose is blocked), then move on — don't dwell on it or bring it up again.
 `.trim();
 
-const SYSTEM_PROMPT = `
+// Both prompts below take the knowledge-base text as a parameter now,
+// instead of a fixed constant baked in at startup, since that text comes
+// fresh from the real library on every request (see getLibraryContext above).
+function buildSystemPrompt(knowledgeBaseText) {
+  return `
 You are the assistant behind ${APP_NAME}, a proof-of-concept built for the Oxford
 Longevity Project (the "Ageing Well" work with Sir Muir Gray). You are talking with a
 retiree or alum from an Oxford college who is trying this for free, as an early tester.
@@ -165,6 +262,12 @@ mobility, what they said they enjoy or used to enjoy, and which of the 4 S's the
 most (someone who mentioned wobbly balance and loves being outdoors is a different
 recommendation from someone who wants more social contact and used to swim competitively).
 Pick two or three, and explain each in one sentence tied to what they told you.
+If someone has described balance problems, a fall, dizziness, or a joint condition, and
+an activity you're suggesting carries real fall or injury risk if balance gives out
+(rowing, cycling, hiking on uneven ground, and similar), add one line recommending they
+mention it to their GP or the class instructor before starting, so the class can be set
+up safely for them. Only add this where the specific risk you're naming actually applies
+to what they told you, not as a blanket disclaimer on every activity.
 
 LOCAL OPTIONS — REAL SEARCH ONLY
 After you've settled on the activities to suggest, use the web_search tool to find real,
@@ -197,15 +300,17 @@ jargon, no lecturing.
 ${GUARDRAILS}
 
 KNOWLEDGE BASE
-${KNOWLEDGE_BASE}
+${knowledgeBaseText}
 `.trim();
+}
 
 // The two-week check-in. Reused guardrails and knowledge base, a much
 // shorter and more targeted job. The opening user message carries the
 // person's name, age band, location, the one change they committed to last
 // time, and a short summary of the plan they were given — see
 // buildFollowupOpeningMessage() below for exactly how that's worded.
-const SESSION2_SYSTEM_PROMPT = `
+function buildFollowupSystemPrompt(knowledgeBaseText) {
+  return `
 You are the assistant behind ${APP_NAME}, running a two-week follow-up conversation, not
 a fresh intake. This is someone who already had a full conversation with you a fortnight
 ago and got a plan.
@@ -234,8 +339,9 @@ In a short conversation (about 6-8 exchanges):
 ${GUARDRAILS}
 
 KNOWLEDGE BASE
-${KNOWLEDGE_BASE}
+${knowledgeBaseText}
 `.trim();
+}
 
 // Once the conversation has reached roughly this many messages (user +
 // assistant turns combined, including the opening intake message), the
@@ -281,6 +387,69 @@ const RED_FLAG_RESPONSE =
   "contact the Samaritans on 116 123 (UK, free, 24/7) or call 999. This conversation will " +
   "pause here — please come back to it another time once you've been seen.";
 
+// Sense check for the final plan only. Takes the plan Claude just wrote and
+// asks a fresh, separately-scoped call to check any specific, checkable
+// claim (a figure, a screening age, a dosing statement, a guideline) against
+// current public health guidance via web search, correcting anything found
+// to be out of date. This is deliberately a second, narrow call rather than
+// loosening the main assistant's own guardrail against medical web_search —
+// it exists specifically because the library itself can go stale (see the
+// aspirin example that led to this being added). On any failure, returns the
+// original plan unchecked: an unverified plan is still better than none.
+const VERIFY_SYSTEM_PROMPT = `
+You are a fact-checking pass for a healthy-ageing plan, not a conversational assistant.
+You will be given a draft plan that may contain specific, checkable claims: a figure, a
+screening age, a dosing or medication-adjacent statement, or a guideline recommendation.
+
+Use web_search to check any such specific claim against current, reputable guidance (NHS,
+USPSTF, WHO, or similarly authoritative sources). Most plans will check out fine — only
+change what's actually wrong or out of date.
+
+If you find something outdated or incorrect, correct it in place and add a short note in
+parentheses explaining what changed and why. If everything checks out, return the plan
+exactly as given. Do not add new advice, activities or sections beyond what's needed to
+correct or confirm what's already there, and keep the same headings and structure.
+Return only the plan text, nothing else.
+`.trim();
+
+async function verifyPlanAgainstCurrentGuidance(planText) {
+  if (!API_KEY) return planText;
+  try {
+    const verifyRes = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": API_KEY,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: MODEL,
+        max_tokens: 2048,
+        system: VERIFY_SYSTEM_PROMPT,
+        messages: [{ role: "user", content: planText }],
+        tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 4 }],
+      }),
+    });
+
+    if (!verifyRes.ok) {
+      console.error("Sense-check call failed:", verifyRes.status, await verifyRes.text());
+      return planText;
+    }
+
+    const data = await verifyRes.json();
+    const checked = (data.content || [])
+      .filter((block) => block.type === "text")
+      .map((block) => block.text)
+      .join("\n")
+      .trim();
+
+    return checked || planText;
+  } catch (err) {
+    console.error("Sense-check error:", err);
+    return planText;
+  }
+}
+
 app.post("/api/chat", async (req, res) => {
   try {
     const { messages, mode } = req.body || {};
@@ -305,10 +474,16 @@ app.post("/api/chat", async (req, res) => {
 
     const isFollowup = mode === "followup";
 
+    // Ground this reply in the real library: ask Pinecone for the passages
+    // most relevant to what the tester just said, then build the system
+    // prompt around those (falls back to the small sample on any failure —
+    // see getLibraryContext above).
+    const knowledgeBaseText = await getLibraryContext(String(lastUserMessage?.content || ""));
+
     const requestBody = {
       model: MODEL,
       max_tokens: 1536,
-      system: isFollowup ? SESSION2_SYSTEM_PROMPT : SYSTEM_PROMPT,
+      system: isFollowup ? buildFollowupSystemPrompt(knowledgeBaseText) : buildSystemPrompt(knowledgeBaseText),
       messages: messages.map((m) => ({ role: m.role, content: m.content })),
     };
 
@@ -346,10 +521,19 @@ app.post("/api/chat", async (req, res) => {
     }
 
     const data = await anthropicRes.json();
-    const reply = (data.content || [])
+    let reply = (data.content || [])
       .filter((block) => block.type === "text")
       .map((block) => block.text)
       .join("\n");
+
+    // Sense check: only the final plan makes specific, checkable claims
+    // (a figure, a screening age, a guideline), so this only runs on the
+    // turn that produces "## Your plan" — not every reply. See
+    // verifyPlanAgainstCurrentGuidance below. Any failure here just returns
+    // the original plan unchecked rather than breaking the reply.
+    if (!isFollowup && reply.includes("## Your plan")) {
+      reply = await verifyPlanAgainstCurrentGuidance(reply);
+    }
 
     res.json({ reply, redFlag: false });
   } catch (err) {
