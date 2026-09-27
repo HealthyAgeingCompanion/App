@@ -409,6 +409,19 @@
     }
   }
 
+  // Scrolls both the chat panel's own internal scrollbar AND the outer page.
+  // On a short conversation, main's overflow-y:auto is doing the scrolling
+  // and this is all that's needed. But .wrap only sets a min-height, so once
+  // the page (header + growing chat + footer) gets taller than the actual
+  // browser window, which happens by the time a long plan lands, the OUTER
+  // page needs to scroll too, and nothing was telling it to. That's why the
+  // next question was landing below the fold: the chat panel scrolled to
+  // its own bottom correctly, but the window itself stayed put.
+  function scrollToBottom() {
+    chatEl.scrollTop = chatEl.scrollHeight;
+    window.scrollTo(0, document.body.scrollHeight);
+  }
+
   function addBubble(role, text) {
     const div = document.createElement("div");
     div.className = "bubble " + role;
@@ -418,7 +431,7 @@
       div.textContent = text;
     }
     chatEl.appendChild(div);
-    chatEl.scrollTop = chatEl.scrollHeight;
+    scrollToBottom();
     return div;
   }
 
@@ -427,7 +440,7 @@
     div.className = "typing";
     div.textContent = "Thinking…";
     chatEl.appendChild(div);
-    chatEl.scrollTop = chatEl.scrollHeight;
+    scrollToBottom();
     return div;
   }
 
@@ -514,6 +527,7 @@
           committedActionText = changeText;
           commitStep.style.display = "none";
           followupStep.style.display = "block";
+          scrollToBottom();
         });
         commitChoices.appendChild(btn);
       });
@@ -522,6 +536,7 @@
       committedActionText = "";
       followupStep.style.display = "block";
     }
+    scrollToBottom();
   }
 
   function autoGrow() {
@@ -597,6 +612,7 @@
   followupNoBtn.addEventListener("click", () => {
     followupStep.style.display = "none";
     planActions.style.display = "flex";
+    scrollToBottom();
   });
 
   followupYesBtn.addEventListener("click", async () => {
@@ -639,6 +655,7 @@
       setTimeout(() => {
         followupStep.style.display = "none";
         planActions.style.display = "flex";
+        scrollToBottom();
       }, 1800);
     } catch (err) {
       followupError.textContent = "Couldn't reach the server. Please try again.";
