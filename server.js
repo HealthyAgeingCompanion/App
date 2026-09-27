@@ -409,7 +409,14 @@ If you find something outdated or incorrect, correct it in place and add a short
 parentheses explaining what changed and why. If everything checks out, return the plan
 exactly as given. Do not add new advice, activities or sections beyond what's needed to
 correct or confirm what's already there, and keep the same headings and structure.
-Return only the plan text, nothing else.
+
+Wrap the plan you return between these exact markers, with nothing before the first one and
+nothing after the second, not even a sentence of commentary. Anything outside the markers —
+what you searched for, what checked out, what you changed — gets thrown away before anyone
+sees it, so it has to go inside your own thinking, never in the visible reply:
+<verified_plan>
+(the plan text goes here, corrected if needed)
+</verified_plan>
 `.trim();
 
 async function verifyPlanAgainstCurrentGuidance(planText) {
@@ -424,7 +431,7 @@ async function verifyPlanAgainstCurrentGuidance(planText) {
       },
       body: JSON.stringify({
         model: MODEL,
-        max_tokens: 2048,
+        max_tokens: 4096,
         system: VERIFY_SYSTEM_PROMPT,
         messages: [{ role: "user", content: planText }],
         tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 4 }],
@@ -437,13 +444,25 @@ async function verifyPlanAgainstCurrentGuidance(planText) {
     }
 
     const data = await verifyRes.json();
-    const checked = (data.content || [])
+    const rawOutput = (data.content || [])
       .filter((block) => block.type === "text")
       .map((block) => block.text)
       .join("\n")
       .trim();
 
-    return checked || planText;
+    // Pull out only what's between the markers, however much narration the
+    // model wrote around them — that narration must never reach the tester.
+    // If the markers are missing entirely (the model ignored the format),
+    // fall back to the original, unverified plan rather than risk showing
+    // that narration as if it were the plan itself.
+    const match = rawOutput.match(/<verified_plan>([\s\S]*?)<\/verified_plan>/);
+    const verified = match ? match[1].trim() : null;
+
+    if (!verified) {
+      console.error("Sense-check reply had no <verified_plan> markers — keeping original plan");
+      return planText;
+    }
+    return verified;
   } catch (err) {
     console.error("Sense-check error:", err);
     return planText;
@@ -482,7 +501,15 @@ app.post("/api/chat", async (req, res) => {
 
     const requestBody = {
       model: MODEL,
-      max_tokens: 1536,
+      // Was 1536. The real library gives the model far more specific detail
+      // to draw on than the old small sample did (real figures, named
+      // studies, table references), so grounded replies run noticeably
+      // longer — especially the final plan, which now also has to fit real
+      // search results for local places in the same turn. Too low a cap here
+      // was cutting replies off mid-search, which is why the app started
+      // stalling and needing an "ok" nudge to carry on instead of finishing
+      // the plan in one go.
+      max_tokens: 4096,
       system: isFollowup ? buildFollowupSystemPrompt(knowledgeBaseText) : buildSystemPrompt(knowledgeBaseText),
       messages: messages.map((m) => ({ role: m.role, content: m.content })),
     };
